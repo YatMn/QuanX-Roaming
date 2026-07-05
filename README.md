@@ -4,7 +4,7 @@
 
 人在不同地区时，网络出口和 App 访问方式经常要跟着变：在内地，大部分国外网站和 App 通常需要走代理；在港澳，很多国外服务可以直连，可能只需要让 AI 这类服务单独走代理。
 
-这份配置的核心思路很简单：用 `环境模式` 在 `中国策略` 和 `香港策略` 之间快速切换，同时保留 AI、常用 App、媒体、金融支付、广告拦截和 rewrite 增强等功能。
+这份配置的核心思路很简单：用 `环境模式` 在 `【CN】中国策略` 和 `【HK】香港策略` 之间快速切换，同时保留 AI、常用 App、媒体、金融支付、广告拦截和 rewrite 增强等功能。
 
 配置导入链接：
 
@@ -24,8 +24,8 @@ https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/profiles/QuanX-Roamin
 
 ## 功能概览
 
-- `环境模式`：在内地常用的 `中国策略` 和港澳常用的 `香港策略` 之间切换。
-- `AI`：AI 流量单独控制，不完全跟随当前地区模式。
+- `环境模式`：在内地常用的 `【CN】中国策略` 和港澳常用的 `【HK】香港策略` 之间切换。
+- `AI`：AI 流量可以跟随当前地区模式，也可以单独指定节点。
 - App 独立策略：Google、YouTube、Telegram、Netflix、TikTok、Instagram、Twitter 等可以单独切换。
 - 媒体分流：包含 Netflix、YouTube、Spotify、哔哩哔哩、国际媒体等规则。
 - `金融支付`：支付宝、微信支付、银联、银行、保险、12306 等可单独控制。
@@ -80,18 +80,18 @@ https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/profiles/QuanX-Roamin
 
 1. 打开 Quantumult X 的策略页。
 2. 找到 `环境模式`。
-3. 切换到 `中国策略`。
+3. 切换到 `【CN】中国策略`。
 4. Google、YouTube、Telegram、Netflix 等国外服务跟随 `环境模式` 走代理。
 5. `金融支付` 建议优先保持 `direct`。
-6. `AI` 可以单独选择一个适合 AI 的节点。
+6. `AI` 可以跟随 `环境模式`，也可以单独选择一个适合 AI 的节点。
 
 在香港、澳门或其他国外服务可直连的地区：
 
 1. 打开 Quantumult X 的策略页。
 2. 找到 `环境模式`。
-3. 切换到 `香港策略`。
+3. 切换到 `【HK】香港策略`。
 4. Google、YouTube、Telegram、Netflix 等常用国外服务可以跟随 `环境模式` 直连。
-5. `AI` 仍然单独选择可用节点。
+5. `AI` 可以跟随 `环境模式`，也可以单独选择可用节点。
 6. 如果某个媒体 App 需要指定地区，可以只切换对应 App 的策略。
 
 遇到单个 App 异常时，优先进入对应策略组手动切换，不需要马上改全局模式。

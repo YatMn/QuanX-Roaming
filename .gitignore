@@ -2,10 +2,12 @@
 .DS_Store
 
 # Internal agent/process materials. Keep them local.
+.agents/
 .superpowers/
 _knowledge_base/
 docs/
 AGENTS.md
+skills-lock.json
 
 # Quantumult X profiles and working copies may contain subscription URLs or
 # provider tokens. Publish only the redacted policy profile below.
