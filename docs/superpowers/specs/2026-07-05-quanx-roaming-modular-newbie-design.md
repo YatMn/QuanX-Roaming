@@ -1,52 +1,40 @@
-# QuanX-Roaming Modular Newbie Design
+# QuanX-Roaming 新手模块化方案设计
 
-Date: 2026-07-05
+日期：2026-07-05
 
-## Goal
+## 目标
 
-Design a beginner-friendly QuanX-Roaming distribution model that lets users add
-their own node subscriptions safely while still receiving ongoing rule and
-rewrite updates from GitHub.
+设计一套适合新手使用的 QuanX-Roaming 分发方案：用户可以安全地添加自己的节点订阅，同时继续从 GitHub 获取规则和 rewrite 的持续更新。
 
-The project should stop presenting the GitHub Raw full profile as the long-term
-working configuration. Testing in Quantumult X showed that a remotely linked
-profile cannot add `server_remote` resources through the resource UI or the
-official `add-resource` URL scheme while it remains in a linked state.
+项目不应再把 GitHub Raw 的完整配置描述成长期工作配置。我们已经在 Quantumult X 中验证：完整配置一旦处于远程关联状态，就不能通过资源页面或官方 `add-resource` URL Scheme 追加 `server_remote` 节点资源。
 
-## Decision
+## 决策
 
-Use a modular model:
+采用模块化模型：
 
-- User-owned local or iCloud profile: editable main configuration used day to
-  day.
-- GitHub-hosted resource modules: public rule and rewrite modules that can keep
-  updating through `filter_remote` and `rewrite_remote`.
-- GitHub-hosted profile file: an installation template, not the user's permanent
-  remote-linked profile.
+- 用户自己的本地或 iCloud 配置：日常使用的可编辑主配置。
+- GitHub 托管的资源模块：公开规则和 rewrite 模块，通过 `filter_remote` 和 `rewrite_remote` 持续更新。
+- GitHub 托管的完整配置文件：安装模板，而不是用户长期远程关联使用的主配置。
 
-This keeps the user workflow simple:
+新手流程保持简单：
 
-1. Download or import the template profile.
-2. Save or copy it as a local or iCloud profile.
-3. Add private node subscriptions in Quantumult X.
-4. Let public filter and rewrite resources update from GitHub.
-5. Follow the changelog only when the framework profile changes.
+1. 下载或导入配置模板。
+2. 保存或复制为本地 / iCloud 配置。
+3. 在 Quantumult X 中添加自己的私有节点订阅。
+4. 让公开 filter 和 rewrite 资源从 GitHub 自动更新。
+5. 只有框架配置变化时，才按 changelog 手动升级。
 
-## Non-Goals
+## 非目标
 
-- Do not support Git, fork, upstream merge, or generated overlay workflows for
-  beginners.
-- Do not require users to edit raw profile text during normal setup.
-- Do not publish node subscriptions, provider names, tokens, or private node
-  details.
-- Do not promise that a GitHub Raw linked full profile can be edited or extended
-  with node resources.
-- Do not split stable framework sections so aggressively that troubleshooting
-  becomes harder for new users.
+- 不为新手支持 Git、fork、upstream merge 或生成式 overlay 工作流。
+- 不要求用户在常规安装过程中编辑原始配置文本。
+- 不发布节点订阅、服务商名称、token 或私有节点细节。
+- 不承诺 GitHub Raw 远程关联的完整配置可以被编辑或追加节点资源。
+- 不把稳定框架拆得过碎，避免新手排查问题时更难理解。
 
-## Repository Layout
+## 仓库结构
 
-Target public layout:
+目标公开结构：
 
 ```text
 profiles/
@@ -69,124 +57,103 @@ docs/
   changelog.md
 ```
 
-`profiles/QuanX-Roaming.conf` remains the beginner template. The README should
-describe it as a template to save as local or iCloud before adding nodes.
+`profiles/QuanX-Roaming.conf` 保持为新手安装模板。README 应明确说明：用户需要把它保存为本地或 iCloud 配置后，再添加自己的节点。
 
-`resources/filters/*.list` and `resources/rewrites/*.conf` are public,
-non-secret modules referenced by the template through GitHub Raw URLs.
+`resources/filters/*.list` 和 `resources/rewrites/*.conf` 是公开、无敏感信息的模块，由模板配置通过 GitHub Raw URL 引用。
 
-## Profile Boundaries
+## 配置边界
 
-Keep these sections in the editable profile template:
+这些内容保留在用户可编辑的模板配置中：
 
 - `[general]`
 - `[task_local]`
 - `[server_local]`
-- `[server_remote]` empty section and user guidance
+- `[server_remote]` 空区块和用户添加节点的提示
 - `[dns]`
 - `[policy]`
-- final fallback rule
-- minimal emergency local rules that must remain close to fallback behavior
+- 最终 fallback 规则
+- 少量必须贴近 fallback 行为的紧急本地规则
 
-Move or aggregate these into GitHub-hosted resources:
+这些内容移动或聚合到 GitHub 托管资源中：
 
-- AI filter rules
-- Google, YouTube, Telegram, social, and app-specific filter rules
-- media and streaming filter rules
-- finance and payment filter rules
-- low-risk default rewrite resources
-- optional/high-risk rewrite resources
+- AI 分流规则
+- Google、YouTube、Telegram、社交和 App 类分流规则
+- 媒体和流媒体分流规则
+- 金融支付分流规则
+- 默认启用的低风险 rewrite 资源
+- 可选 / 高风险 rewrite 资源
 
-The `[policy]` group names are an API contract. Remote filter modules must only
-reference stable policies that the template defines, such as `AI`, `Google`,
-`YouTube`, `Telegram`, `Netflix`, `国际媒体`, `金融支付`, `广告拦截`, and
-`兜底分流`.
+`[policy]` 里的策略组名称是公开模块依赖的接口契约。远程 filter 模块只能引用模板中稳定存在的策略组，例如 `AI`、`Google`、`YouTube`、`Telegram`、`Netflix`、`国际媒体`、`金融支付`、`广告拦截`、`兜底分流`。
 
-## User Workflow
+## 用户流程
 
-README should lead with one recommended path:
+README 应只主推一条推荐路径：
 
-1. Get the latest `profiles/QuanX-Roaming.conf` template.
-2. In Quantumult X, save or copy it as a local or iCloud configuration.
-3. Switch to that local or iCloud configuration.
-4. Add a node subscription from the user's provider.
-5. Update node resources.
-6. Confirm regional node groups and app policy groups show usable nodes.
+1. 获取最新版 `profiles/QuanX-Roaming.conf` 模板。
+2. 在 Quantumult X 中保存或复制为本地 / iCloud 配置。
+3. 切换到这个本地 / iCloud 配置。
+4. 添加用户自己的节点订阅。
+5. 更新节点资源。
+6. 确认地区节点组和 App 策略组能看到可用节点。
 
-The README may mention the Raw link, but it must warn that using it as a linked
-configuration is for previewing or downloading the template. It is not the
-recommended long-term working profile because linked profiles cannot be extended
-with node resources in the tested flow.
+README 可以保留 Raw 链接，但必须说明：把 Raw 链接作为远程关联配置更适合预览或下载模板，不是推荐的长期工作方式。原因是我们已验证远程关联配置无法追加节点资源。
 
-## Update Model
+## 更新模型
 
-There are two update classes.
+更新分成两类。
 
-Automatic resource updates:
+自动资源更新：
 
-- Filter modules in `resources/filters/`
-- Rewrite modules in `resources/rewrites/`
-- Changes that do not rename policy groups or alter framework structure
+- `resources/filters/` 下的 filter 模块
+- `resources/rewrites/` 下的 rewrite 模块
+- 不改策略组名称、不改框架结构的规则变化
 
-Manual framework updates:
+手动框架更新：
 
-- Policy group changes
-- Node region group changes
-- DNS, MITM, fallback, or server section changes
-- Any change that requires users to replace or edit the local/iCloud template
+- 策略组变化
+- 地区节点组变化
+- DNS、MITM、fallback 或 server 区块变化
+- 任何要求用户替换或编辑本地 / iCloud 模板的变化
 
-`docs/changelog.md` should separate resource-only changes from framework
-changes. Framework changes need a short migration note for existing users.
+`docs/changelog.md` 应区分“资源更新”和“框架更新”。框架更新需要给已有用户一段短迁移说明。
 
-## Error Handling
+## 错误处理
 
-Expected user problems and documented response:
+预期问题和文档响应：
 
-- No nodes appear: add a node subscription to the local/iCloud profile, then
-  update node resources.
-- Node subscription cannot be added: confirm the current profile is local or
-  iCloud, not a linked GitHub Raw configuration.
-- Rule updates work but new policy groups are missing: the local framework is
-  outdated; apply the latest template or follow the changelog migration note.
-- App routing seems wrong: check the app-specific policy group first, then
-  region node groups, then rewrite resources.
-- Payment or banking breaks: switch `金融支付` to `direct` first; disable risky
-  rewrite modules before changing broad routing.
+- 没有节点出现：先在本地 / iCloud 配置中添加节点订阅，再更新节点资源。
+- 无法添加节点订阅：确认当前配置是本地或 iCloud 配置，而不是 GitHub Raw 远程关联配置。
+- 规则更新了，但新策略组不存在：本地框架配置过旧，需要应用最新版模板或按 changelog 迁移。
+- 某个 App 路由异常：先检查对应 App 策略组，再检查地区节点组，最后检查 rewrite 资源。
+- 支付或银行 App 异常：先把 `金融支付` 切到 `direct`；在修改大范围路由前，先关闭高风险 rewrite 模块排查。
 
-## Validation
+## 验证要求
 
-Before publishing a modular change:
+发布模块化变更前：
 
-- Verify every `force-policy` target exists in the template `[policy]` section.
-- Verify finance rules route to `金融支付` and stay before broad proxy rules.
-- Verify node region groups still exclude subscription info nodes such as
-  traffic, expiry, reset, URL, and notification entries.
-- Verify no private `.conf`, subscription URL, token, provider name, or node
-  detail is staged.
-- Re-read changed docs for consistency with the tested linked-profile behavior.
+- 确认每个 `force-policy` 目标都存在于模板 `[policy]` 区块中。
+- 确认金融规则仍路由到 `金融支付`，并且位于宽泛代理规则之前。
+- 确认地区节点组继续排除订阅信息节点，例如流量、到期、重置、URL、通知类节点。
+- 确认没有私有 `.conf`、订阅 URL、token、服务商名称或节点细节被暂存。
+- 重新阅读改动过的文档，确认没有违背已验证的远程关联配置行为。
 
-Existing validation scripts can continue to cover the template:
+现有验证脚本继续覆盖模板配置：
 
 - `.superpowers/sdd/validate-region-policy.sh profiles/QuanX-Roaming.conf`
 - `.superpowers/sdd/validate-finance-button.sh profiles/QuanX-Roaming.conf`
 - `.superpowers/sdd/validate-finance-egress.sh profiles/QuanX-Roaming.conf`
 
-Future implementation should add checks for modular resources:
+后续实施时应新增模块化资源检查：
 
-- referenced remote resource files exist;
-- `force-policy` values in resource modules match template policy groups;
-- `.gitignore` allows only intended public modules and keeps private profiles
-  ignored.
+- 被引用的远程资源文件必须存在。
+- 资源模块中的 `force-policy` 值必须匹配模板策略组。
+- `.gitignore` 只允许预期公开模块进入 Git，同时继续忽略私有配置。
 
-## Open Implementation Notes
+## 实施注意事项
 
-The current `.gitignore` ignores all `.conf` files except
-`profiles/QuanX-Roaming.conf`. Implementation must either:
+当前 `.gitignore` 会忽略除 `profiles/QuanX-Roaming.conf` 以外的所有 `.conf` 文件。实施时必须二选一：
 
-- use non-`.conf` extensions for public modules where Quantumult X accepts them;
-  or
-- explicitly unignore selected public resource paths such as
-  `resources/rewrites/*.conf`.
+- 如果 Quantumult X 接受，公开模块优先使用非 `.conf` 扩展名；或
+- 显式放开特定公开资源路径，例如 `resources/rewrites/*.conf`。
 
-Do not force-add ignored files until the ignore rules are updated and the files
-are confirmed to contain no secrets.
+在更新 ignore 规则并确认文件不含秘密信息之前，不要强制添加被忽略的文件。
