@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Internal agent/process materials. Keep them local.
+.superpowers/
+_knowledge_base/
+docs/
+AGENTS.md
+
+# Quantumult X profiles and working copies may contain subscription URLs or
+# provider tokens. Publish only the redacted policy profile below.
+*.conf
+*.bak*
+!profiles/QuanX-Roaming.conf
+profiles/README.md
+
+# Local private notes.
+.private/
