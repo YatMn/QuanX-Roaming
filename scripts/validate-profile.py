@@ -43,7 +43,7 @@ for number, line in SECTIONS.get("[policy]", []):
 REGIONS = {
     "香港节点": ("香港 01", "HK 01", "hk-02", "Hong Kong 03", "🇭🇰 04", "港01"),
     "台湾节点": ("台湾 01", "TW 01", "Taiwan 02", "臺灣 03", "🇹🇼 04", "台01"),
-    "日本节点": ("日本 01", "JP 01", "jp-02", "Japan 03", "🇯🇵 04", "日01", "日本 01 | No.1", "JP 01 | NO.1"),
+    "日本节点": ("日本 01", "JP 01", "jp-02", "Japan 03", "🇯🇵 04", "日01", "日本 01 | No.1", "JP 01 | NO.1", "JP 永久专线 01"),
     "新加坡节点": ("新加坡 01", "SG 01", "Singapore 02", "🇸🇬 03", "狮01"),
     "韩国节点": ("韩国 01", "KR 01", "Seoul 02", "Korea 03", "🇰🇷 04", "韓01"),
     "美国节点": ("美国 01", "US 01", "USA 02", "United States 03", "🇺🇸 04", "美01"),
@@ -128,7 +128,7 @@ class ProfileContract(unittest.TestCase):
             if "server-tag-regex" not in options:
                 continue
             pattern = self.pattern(group)
-            for sample in ("JP 剩余 20GB", "US 到期 2027", "HK Traffic 10GB", "JP used 10GB", "JP Total 100GB", "US Notice", "JP Renew", "SG Quota", "DE Bandwidth", "CN 01", "CN01", "CHN01", "China 02", "中国 03", "🇨🇳 04", ""):
+            for sample in ("JP 剩余 20GB", "US 到期 2027", "HK Traffic 10GB", "JP used 10GB", "JP Total 100GB", "US Notice", "JP Renew", "SG Quota", "DE Bandwidth", "服务商 永久:portal.example", "JP 永久：portal.example", "JP 永久 : portal.example", "CN 01", "CN01", "CHN01", "China 02", "中国 03", "🇨🇳 04", ""):
                 with self.subTest(group=group, sample=sample):
                     self.assertFalse(pattern.search(sample))
         for name in ("自动选择", "低延迟优先", "手动固定"):
