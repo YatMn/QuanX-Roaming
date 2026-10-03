@@ -12,7 +12,7 @@
  *      （两次请求分别走了 IPv4 和 IPv6 时，改为要求国家一致）。
  *
  * [task_local]
- * 0,30 * * * * https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点定时检测, img-url=checkmark.shield.fill.system, enabled=true
+ * 0 9 * * * https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点定时检测, img-url=checkmark.shield.fill.system, enabled=true
  * event-interaction https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点立即检测, img-url=checkmark.shield.system, enabled=true
  *
  * 运行方式：
