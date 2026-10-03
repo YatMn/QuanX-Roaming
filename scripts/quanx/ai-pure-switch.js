@@ -1,24 +1,23 @@
 /*
- * AI 低风险节点检测与切换（Quantumult X）
+ * AI 地区纯净组：低风险节点检测与切换（Quantumult X）
  *
- * 结构：
- *   AI纯净（static）→ 日本纯净 / 美国纯净 / …（static，各含该地区全部节点）
- *   - 每个地区纯净组：保持当前节点，直到它不再是低风险；不合格时换成该地区欺诈分最低的合格节点。
- *   - AI纯净：保持当前地区，直到该地区没有合格节点；再按组内顺序换到第一个有合格节点的地区。
- *   - 找不到合格节点时不做切换，只记录并（定时任务时）通知。
+ * 处理若干个 static 地区纯净组（默认 日本纯净 / 美国纯净 / 新加坡纯净 / 韩国纯净 / 欧洲纯净，各含该地区全部节点）：
+ *   - 保持组内当前节点，直到它不再是低风险；不合格时换成该组欺诈分最低的合格节点。
+ *   - 组内没有合格节点时不切换，只记录并（定时任务时）通知。
+ *   - 不会跨地区切换：选哪个地区纯净组由用户在 AI 策略中手动决定。
  *
  * 合格条件（全部满足）：
  *   1. my.ippure.com 返回数字 fraudScore，且 ≤ 阈值（默认 25，即「低风险」）；缺字段视为检测失败。
  *   2. 同一节点请求 chatgpt.com/cdn-cgi/trace，出口 IP 与上一步一致，且地区不在 AI 不支持名单内。
  *
  * [task_local]
- * 0,30 * * * * https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js#policy=AI纯净, tag=AI纯净定时检测, img-url=checkmark.shield.fill.system, enabled=true
- * event-interaction https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js#policy=AI纯净&full=1, tag=AI纯净立即检测, img-url=checkmark.shield.system, enabled=true
+ * 0,30 * * * * https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点定时检测, img-url=checkmark.shield.fill.system, enabled=true
+ * event-interaction https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js#full=1, tag=纯净节点立即检测, img-url=checkmark.shield.system, enabled=true
  *
  * 参数（写在脚本地址 # 之后，用 & 连接）：
- *   policy=AI纯净  顶层纯净组名称
- *   max=25         欺诈分上限（含）
- *   full=1         逐个检测全部节点并输出完整结果；不加时只复查当前节点，当前节点不合格才检测该地区全部节点
+ *   groups=日本纯净+美国纯净  要处理的地区纯净组，用 + 分隔；不填时用上面的默认五组
+ *   max=25                    欺诈分上限（含）
+ *   full=1                    逐个检测全部节点并输出完整结果；不加时只复查当前节点，当前节点不合格才检测该组全部节点
  *
  * 依赖的 Quantumult X 接口：$task.fetch 的 opts.policy（build 598+），
  * $configuration.sendMessage 的 get_customized_policy / get_policy_state / set_policy_state。
@@ -26,7 +25,8 @@
  */
 
 const ARGS = parseArgs(($environment && $environment.sourcePath) || "");
-const ROOT = ARGS.policy || "AI纯净";
+const DEFAULT_GROUPS = ["日本纯净", "美国纯净", "新加坡纯净", "韩国纯净", "欧洲纯净"];
+const GROUPS = ARGS.groups ? ARGS.groups.split("+").map(name => name.trim()).filter(Boolean) : DEFAULT_GROUPS;
 const MAX_SCORE = Number.isFinite(Number(ARGS.max)) ? Number(ARGS.max) : 25;
 const FULL = ARGS.full === "1";
 const IS_CRON = ["0", "-1"].includes(String($environment && $environment.executeType));
@@ -42,16 +42,17 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
 main().catch(error => finish(null, `检测中断：${error && error.message ? error.message : error}`));
 
 async function main() {
-  const regions = (await candidatesOf([ROOT]))[ROOT] || [];
-  if (!regions.length) throw new Error(`找不到策略组「${ROOT}」或其中没有地区组`);
-  const nodesByRegion = await candidatesOf(regions);
+  const nodesByRegion = await candidatesOf(GROUPS);
+  const regions = GROUPS.filter(name => nodesByRegion[name]);
+  if (!regions.length) throw new Error(`找不到地区纯净组：${GROUPS.join("、")}`);
   const state = await send({ action: "get_policy_state" });
 
-  const report = { time: Date.now(), max: MAX_SCORE, full: FULL, root: null, regions: {} };
-  for (const region of regions) {
-    report.regions[region] = await settleRegion(region, nodesByRegion[region] || [], selected(state, region));
+  const report = { time: Date.now(), max: MAX_SCORE, full: FULL, regions: {} };
+  for (const region of GROUPS) {
+    report.regions[region] = nodesByRegion[region]
+      ? await settleRegion(region, nodesByRegion[region], selected(state, region))
+      : { status: "missing", tested: 0 };
   }
-  report.root = await settleRoot(regions, report.regions, selected(state, ROOT));
   finish(report);
 }
 
@@ -77,14 +78,6 @@ async function settleRegion(region, nodes, current) {
   const best = passing.slice().sort((a, b) => a.score - b.score)[0];
   await send({ action: "set_policy_state", content: { [region]: best.node } });
   return { status: "switched", from: current, node: best.node, result: best, tested: results.length, failed };
-}
-
-async function settleRoot(regions, regionReports, current) {
-  const usable = regions.filter(region => ["kept", "switched"].includes(regionReports[region].status));
-  if (usable.includes(current)) return { status: "kept", region: current };
-  if (!usable.length) return { status: "none", region: current };
-  await send({ action: "set_policy_state", content: { [ROOT]: usable[0] } });
-  return { status: "switched", from: current, region: usable[0] };
 }
 
 async function probe(node) {
@@ -134,13 +127,18 @@ function parseTrace(body) {
   return { ip: fields.ip, loc: (fields.loc || "").toUpperCase() };
 }
 
+// 逐组查询，单个组不存在时只把该组记为缺失，不影响其他组。值为 undefined 表示组不存在。
 async function candidatesOf(names) {
-  const response = await send({ action: "get_customized_policy", content: names });
   const output = {};
-  names.forEach(name => {
-    const policy = response.ret && response.ret[name];
-    output[name] = policy && Array.isArray(policy.candidates) ? policy.candidates : [];
-  });
+  for (const name of names) {
+    try {
+      const response = await send({ action: "get_customized_policy", content: name });
+      const policy = response.ret && response.ret[name];
+      if (policy) output[name] = Array.isArray(policy.candidates) ? policy.candidates : [];
+    } catch (error) {
+      console.log(`读取策略组「${name}」失败：${error.message}`);
+    }
+  }
   return output;
 }
 
@@ -183,16 +181,16 @@ function finish(report, error) {
   const previous = load();
   if (report) save(report);
   const lines = error ? [error] : summarize(report);
-  console.log(`AI纯净检测\n${lines.join("\n")}`);
+  console.log(`纯净节点检测\n${lines.join("\n")}`);
 
   if (IS_CRON) {
     const changes = error ? [error] : notable(report, previous);
-    if (changes.length) $notify("AI纯净检测", "", changes.join("\n"));
+    if (changes.length) $notify("纯净节点检测", "", changes.join("\n"));
     $done();
   } else {
     const body = lines.map(line => escapeHtml(line)).join("<br/>");
     $done({
-      title: "AI纯净检测",
+      title: "纯净节点检测",
       htmlMessage: `<p style="text-align: left; font-family: -apple-system; font-size: 14px;">${body}</p>`,
     });
   }
@@ -200,15 +198,11 @@ function finish(report, error) {
 
 function summarize(report) {
   const lines = [];
-  const root = report.root;
-  if (root.status === "switched") lines.push(`${ROOT}：${root.from || "未选择"} → ${root.region}`);
-  else if (root.status === "kept") lines.push(`${ROOT}：保持 ${root.region}`);
-  else lines.push(`${ROOT}：没有任何低风险节点，保持 ${root.region || "当前选择"}`);
-
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
     const detail = item.result ? `（欺诈分 ${item.result.score}，${item.result.loc}）` : "";
-    if (item.status === "empty") lines.push(`${region}：没有匹配的节点`);
+    if (item.status === "missing") lines.push(`${region}：配置中没有这个策略组`);
+    else if (item.status === "empty") lines.push(`${region}：没有匹配的节点`);
     else if (item.status === "none") lines.push(`${region}：检测 ${item.tested} 个，无低风险节点，保持 ${item.node || "当前选择"}`);
     else if (item.status === "switched") lines.push(`${region}：${item.from || "未选择"} → ${item.node}${detail}`);
     else lines.push(`${region}：保持 ${item.node}${detail}`);
@@ -221,10 +215,6 @@ function summarize(report) {
 function notable(report, previous) {
   const changes = [];
   const before = (previous && previous.regions) || {};
-  if (report.root.status === "switched") changes.push(`${ROOT}：${report.root.from || "未选择"} → ${report.root.region}`);
-  if (report.root.status === "none" && !(previous && previous.root && previous.root.status === "none")) {
-    changes.push(`${ROOT}：没有任何低风险节点，已保持当前选择`);
-  }
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
     if (item.status === "switched") changes.push(`${region}：${item.from || "未选择"} → ${item.node}`);
@@ -244,7 +234,7 @@ function load() {
 }
 
 function save(report) {
-  const compact = { time: report.time, max: report.max, root: report.root, regions: {} };
+  const compact = { time: report.time, max: report.max, regions: {} };
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
     compact.regions[region] = { status: item.status, node: item.node, score: item.result && item.result.score, tested: item.tested };

@@ -57,7 +57,6 @@ APPLE_INTELLIGENCE_HOSTS = {
     "cp4.cloudflare.com",
     "apple-relay.apple.com",
 }
-AI_PURE_ROOT = "AI纯净"
 AI_PURE_GROUPS = {"日本纯净": "日本节点", "美国纯净": "美国节点", "新加坡纯净": "新加坡节点", "韩国纯净": "韩国节点", "欧洲纯净": "欧洲节点"}
 AI_PURE_SCRIPT = "https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js"
 APPLE_BLOCK_START = "# BEGIN Apple智能精准分流"
@@ -98,7 +97,7 @@ class ProfileContract(unittest.TestCase):
             visit(name, set())
 
     def test_stable_defaults_do_not_select_by_latency(self):
-        self.assertEqual(POLICIES["AI"][1][0], "AI纯净")
+        self.assertEqual(POLICIES["AI"][1][0], "日本纯净")
         self.assertEqual(POLICIES["【CN】中国策略"][1][0], "自动选择")
         for name in (*REGIONS, "自动选择"):
             with self.subTest(group=name):
@@ -139,34 +138,34 @@ class ProfileContract(unittest.TestCase):
             self.assertTrue(re.search(POLICIES[name][2]["server-tag-regex"], "JP CN2 01"), "CN2 transport label is not mainland location")
 
     def test_ai_purity_groups_are_script_switchable_region_pools(self):
-        kind, candidates, options = POLICIES[AI_PURE_ROOT]
-        self.assertEqual(kind, "static", "set_policy_state only works on static groups")
-        self.assertEqual(candidates, list(AI_PURE_GROUPS), "AI纯净 must list the region purity groups in preference order")
-        self.assertFalse({"server-tag-regex", "resource-tag-regex"} & options.keys())
         for group, region in AI_PURE_GROUPS.items():
             with self.subTest(group=group):
                 kind, candidates, options = POLICIES[group]
                 self.assertEqual(kind, "static", "set_policy_state only works on static groups")
                 self.assertFalse(candidates, "region purity groups must hold actual nodes")
                 self.assertEqual(options.get("server-tag-regex"), POLICIES[region][2]["server-tag-regex"], "purity group must cover exactly its region's nodes")
-        self.assertFalse(any("香港" in group for group in AI_PURE_GROUPS), "HK exits are unsupported by Claude/ChatGPT")
+        purity = [name for name in POLICIES if name.endswith("纯净")]
+        self.assertCountEqual(purity, AI_PURE_GROUPS, "no cross-region purity group and no HK purity group")
 
-    def test_ai_offers_auto_purity_and_manual_regions(self):
+    def test_ai_offers_region_purity_and_unchecked_regions(self):
         candidates = POLICIES["AI"][1]
-        self.assertEqual(candidates[:len(AI_PURE_GROUPS) + 1], [AI_PURE_ROOT, *AI_PURE_GROUPS], "purity choices come first")
+        self.assertEqual(candidates[:len(AI_PURE_GROUPS)], list(AI_PURE_GROUPS), "purity choices come first")
         for region in AI_PURE_GROUPS.values():
             self.assertIn(region, candidates, "unchecked region groups stay available as manual choices")
         self.assertEqual(candidates.index("香港节点"), max(candidates.index(r) for r in REGIONS if r in candidates), "HK is the last region choice")
 
-    def test_ai_purity_task_targets_existing_root(self):
+    def test_ai_purity_task_matches_script_defaults(self):
         tasks = [line for _, line in SECTIONS.get("[task_local]", [])]
-        cron = [line for line in tasks if f"{AI_PURE_SCRIPT}#policy={AI_PURE_ROOT}," in line and not line.startswith("event-interaction")]
-        button = [line for line in tasks if line.startswith(f"event-interaction {AI_PURE_SCRIPT}#policy={AI_PURE_ROOT}&full=1,")]
+        cron = [line for line in tasks if f" {AI_PURE_SCRIPT}," in line and not line.startswith("event-interaction")]
+        button = [line for line in tasks if line.startswith(f"event-interaction {AI_PURE_SCRIPT}#full=1,")]
         self.assertEqual(len(cron), 1, "exactly one scheduled purity check")
         self.assertEqual(len(button), 1, "exactly one manual full purity check")
         self.assertIn("enabled=true", cron[0])
         script = Path(__file__).resolve().parent / "quanx/ai-pure-switch.js"
         self.assertTrue(script.is_file(), "task references a script that is not in this repository")
+        defaults = re.search(r"const DEFAULT_GROUPS = \[([^\]]*)\]", script.read_text(encoding="utf-8"))
+        self.assertTrue(defaults, "script default group list not found")
+        self.assertEqual(re.findall(r'"([^"]+)"', defaults[1]), list(AI_PURE_GROUPS), "tasks pass no group list, so script defaults must match the profile")
 
     def test_youtube_resource_precedes_broad_google_resource(self):
         tags = []
