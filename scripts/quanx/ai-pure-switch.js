@@ -8,7 +8,8 @@
  *
  * 合格条件（全部满足）：
  *   1. my.ippure.com 返回数字 fraudScore，且 ≤ 阈值（默认 25，即「低风险」）；缺字段视为检测失败。
- *   2. 同一节点请求 chatgpt.com/cdn-cgi/trace，出口 IP 与上一步一致，且地区不在 AI 不支持名单内。
+ *   2. 同一节点请求 chatgpt.com/cdn-cgi/trace，地区不在 AI 不支持名单内；出口 IP 与上一步一致
+ *      （两次请求分别走了 IPv4 和 IPv6 时，改为要求国家一致）。
  *
  * [task_local]
  * 0,30 * * * * https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点定时检测, img-url=checkmark.shield.fill.system, enabled=true
@@ -92,8 +93,14 @@ async function probe(node) {
     const trace = parseTrace((await request(TRACE_URL, node)).body);
     result.loc = trace.loc;
     if (!trace.ip || !trace.loc) return fail(result, "AI 出口检测无结果");
-    if (trace.ip !== info.ip) return fail(result, "AI 出口 IP 与纯净度检测 IP 不一致");
     if (BLOCKED_LOC.includes(trace.loc)) return fail(result, `AI 出口地区 ${trace.loc} 不受支持`);
+    // 两个检测域名都同时支持 IPv4/IPv6，同一节点的两次请求可能走不同协议：同协议时要求 IP 一致，跨协议时退而核对国家。
+    if (isIPv6(trace.ip) === isIPv6(info.ip)) {
+      if (trace.ip !== info.ip) return fail(result, "AI 出口 IP 与纯净度检测 IP 不一致");
+    } else {
+      if (trace.loc !== String(info.countryCode || "").toUpperCase()) return fail(result, "AI 出口与纯净度检测的协议和国家都不一致");
+      result.crossFamily = true;
+    }
     result.ok = true;
     return result;
   } catch (error) {
@@ -116,6 +123,10 @@ function request(url, node) {
       throw new Error((reason && reason.error) || "请求超时");
     }
   );
+}
+
+function isIPv6(ip) {
+  return String(ip || "").includes(":");
 }
 
 function parseTrace(body) {
@@ -200,7 +211,7 @@ function summarize(report) {
   const lines = [];
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
-    const detail = item.result ? `（欺诈分 ${item.result.score}，${item.result.loc}）` : "";
+    const detail = item.result ? `（欺诈分 ${item.result.score}，${item.result.loc}${item.result.crossFamily ? "，IPv4/IPv6 不同，按国家核对" : ""}）` : "";
     if (item.status === "missing") lines.push(`${region}：配置中没有这个策略组`);
     else if (item.status === "empty") lines.push(`${region}：没有匹配的节点`);
     else if (item.status === "none") lines.push(`${region}：检测 ${item.tested} 个，无低风险节点，保持 ${item.node || "当前选择"}`);
