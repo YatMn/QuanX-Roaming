@@ -57,7 +57,7 @@ APPLE_INTELLIGENCE_HOSTS = {
     "cp4.cloudflare.com",
     "apple-relay.apple.com",
 }
-AI_PURE_GROUPS = {"日本纯净": "日本节点", "美国纯净": "美国节点", "新加坡纯净": "新加坡节点", "韩国纯净": "韩国节点", "欧洲纯净": "欧洲节点"}
+AI_PURE_GROUPS = {f"{region}（纯净）": region for region in ("日本节点", "美国节点", "新加坡节点", "韩国节点", "欧洲节点")}
 AI_PURE_SCRIPT = "https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js"
 APPLE_BLOCK_START = "# BEGIN Apple智能精准分流"
 APPLE_BLOCK_END = "# END Apple智能精准分流"
@@ -97,7 +97,7 @@ class ProfileContract(unittest.TestCase):
             visit(name, set())
 
     def test_stable_defaults_do_not_select_by_latency(self):
-        self.assertEqual(POLICIES["AI"][1][0], "日本纯净")
+        self.assertEqual(POLICIES["AI"][1][0], "日本节点")
         self.assertEqual(POLICIES["【CN】中国策略"][1][0], "自动选择")
         for name in (*REGIONS, "自动选择"):
             with self.subTest(group=name):
@@ -144,20 +144,23 @@ class ProfileContract(unittest.TestCase):
                 self.assertEqual(kind, "static", "set_policy_state only works on static groups")
                 self.assertFalse(candidates, "region purity groups must hold actual nodes")
                 self.assertEqual(options.get("server-tag-regex"), POLICIES[region][2]["server-tag-regex"], "purity group must cover exactly its region's nodes")
-        purity = [name for name in POLICIES if name.endswith("纯净")]
+        purity = [name for name in POLICIES if "纯净" in name]
         self.assertCountEqual(purity, AI_PURE_GROUPS, "no cross-region purity group and no HK purity group")
+        for group, region in AI_PURE_GROUPS.items():
+            self.assertEqual(POLICY_NAMES.index(group), POLICY_NAMES.index(region) + 1, "purity group is defined right below its region group")
 
     def test_ai_offers_region_purity_and_unchecked_regions(self):
         candidates = POLICIES["AI"][1]
-        self.assertEqual(candidates[:len(AI_PURE_GROUPS)], list(AI_PURE_GROUPS), "purity choices come first")
-        for region in AI_PURE_GROUPS.values():
+        for group, region in AI_PURE_GROUPS.items():
             self.assertIn(region, candidates, "unchecked region groups stay available as manual choices")
+            self.assertEqual(candidates.index(group), candidates.index(region) + 1, "purity choice sits right below its region")
         self.assertEqual(candidates.index("香港节点"), max(candidates.index(r) for r in REGIONS if r in candidates), "HK is the last region choice")
 
     def test_ai_purity_task_matches_script_defaults(self):
         tasks = [line for _, line in SECTIONS.get("[task_local]", [])]
         cron = [line for line in tasks if f" {AI_PURE_SCRIPT}," in line and not line.startswith("event-interaction")]
-        button = [line for line in tasks if line.startswith(f"event-interaction {AI_PURE_SCRIPT}#full=1,")]
+        button = [line for line in tasks if line.startswith(f"event-interaction {AI_PURE_SCRIPT},")]
+        self.assertFalse([line for line in tasks if line.startswith(f"event-interaction {AI_PURE_SCRIPT}#")], "QX rejects event-interaction script URLs with # arguments")
         self.assertEqual(len(cron), 1, "exactly one scheduled purity check")
         self.assertEqual(len(button), 1, "exactly one manual full purity check")
         self.assertIn("enabled=true", cron[0])

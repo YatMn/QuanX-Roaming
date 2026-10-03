@@ -1,10 +1,10 @@
 /*
- * AI 地区纯净组：低风险节点检测与切换（Quantumult X）
+ * 地区节点（纯净）组：低风险节点检测与切换（Quantumult X）
  *
- * 处理若干个 static 地区纯净组（默认 日本纯净 / 美国纯净 / 新加坡纯净 / 韩国纯净 / 欧洲纯净，各含该地区全部节点）：
+ * 处理若干个 static 纯净组（默认 日本节点（纯净）/ 美国 / 新加坡 / 韩国 / 欧洲节点（纯净），各含同名地区组的全部节点）：
  *   - 保持组内当前节点，直到它不再是低风险；不合格时换成该组欺诈分最低的合格节点。
  *   - 组内没有合格节点时不切换，只记录并（定时任务时）通知。
- *   - 不会跨地区切换：选哪个地区纯净组由用户在 AI 策略中手动决定。
+ *   - 不会跨地区切换：选哪个纯净组由用户在 AI 策略中手动决定。
  *
  * 合格条件（全部满足）：
  *   1. my.ippure.com 返回数字 fraudScore，且 ≤ 阈值（默认 25，即「低风险」）；缺字段视为检测失败。
@@ -13,12 +13,17 @@
  *
  * [task_local]
  * 0,30 * * * * https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点定时检测, img-url=checkmark.shield.fill.system, enabled=true
- * event-interaction https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js#full=1, tag=纯净节点立即检测, img-url=checkmark.shield.system, enabled=true
+ * event-interaction https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点立即检测, img-url=checkmark.shield.system, enabled=true
  *
- * 参数（写在脚本地址 # 之后，用 & 连接）：
- *   groups=日本纯净+美国纯净  要处理的地区纯净组，用 + 分隔；不填时用上面的默认五组
- *   max=25                    欺诈分上限（含）
- *   full=1                    逐个检测全部节点并输出完整结果；不加时只复查当前节点，当前节点不合格才检测该组全部节点
+ * 运行方式：
+ *   定时任务：只复查各组当前节点，当前节点不合格才检测该组全部节点；有切换或新出现「无低风险节点」时通知。
+ *   按钮（event-interaction）：逐个检测全部节点并弹窗列出结果；在某个纯净组上长按运行时只检测该组。
+ *   按钮的脚本地址不要带 # 参数，否则 Quantumult X 会提示资源无效。
+ *
+ * 可选参数（仅定时任务，写在脚本地址 # 之后，用 & 连接）：
+ *   groups=日本节点（纯净）+美国节点（纯净）  要处理的纯净组，用 + 分隔；不填时用默认五组
+ *   max=25                                    欺诈分上限（含）
+ *   full=1                                    定时任务也逐个检测全部节点
  *
  * 依赖的 Quantumult X 接口：$task.fetch 的 opts.policy（build 598+），
  * $configuration.sendMessage 的 get_customized_policy / get_policy_state / set_policy_state。
@@ -26,11 +31,16 @@
  */
 
 const ARGS = parseArgs(($environment && $environment.sourcePath) || "");
-const DEFAULT_GROUPS = ["日本纯净", "美国纯净", "新加坡纯净", "韩国纯净", "欧洲纯净"];
-const GROUPS = ARGS.groups ? ARGS.groups.split("+").map(name => name.trim()).filter(Boolean) : DEFAULT_GROUPS;
+const DEFAULT_GROUPS = ["日本节点（纯净）", "美国节点（纯净）", "新加坡节点（纯净）", "韩国节点（纯净）", "欧洲节点（纯净）"];
 const MAX_SCORE = Number.isFinite(Number(ARGS.max)) ? Number(ARGS.max) : 25;
-const FULL = ARGS.full === "1";
-const IS_CRON = ["0", "-1"].includes(String($environment && $environment.executeType));
+// 按钮运行时 $environment.params 是长按的节点或策略名；定时任务没有这个值。
+const PRESSED = $environment && typeof $environment.params === "string" && $environment.params ? $environment.params : undefined;
+const IS_CRON = !PRESSED;
+const FULL = ARGS.full === "1" || !IS_CRON;
+// 按钮脚本有运行时限：到点后不再检测新节点，直接弹出已有结果。
+const DEADLINE = IS_CRON ? Infinity : Date.now() + 20000;
+const LISTED = ARGS.groups ? ARGS.groups.split("+").map(name => name.trim()).filter(Boolean) : DEFAULT_GROUPS;
+const GROUPS = LISTED.includes(PRESSED) ? [PRESSED] : LISTED;
 const CONCURRENCY = 4;
 const TIMEOUT = 5000;
 const STORE_KEY = "quanx_roaming_ai_pure";
@@ -40,12 +50,13 @@ const TRACE_URL = "https://chatgpt.com/cdn-cgi/trace";
 const BLOCKED_LOC = ["CN", "HK", "MO", "RU", "BY", "IR", "KP", "CU", "SY"];
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
+console.log(`纯净节点检测开始：${IS_CRON ? "定时" : "按钮"}，长按对象 ${PRESSED || "无"}`);
 main().catch(error => finish(null, `检测中断：${error && error.message ? error.message : error}`));
 
 async function main() {
   const nodesByRegion = await candidatesOf(GROUPS);
   const regions = GROUPS.filter(name => nodesByRegion[name]);
-  if (!regions.length) throw new Error(`找不到地区纯净组：${GROUPS.join("、")}`);
+  if (!regions.length) throw new Error(`找不到纯净组：${GROUPS.join("、")}`);
   const state = await send({ action: "get_policy_state" });
 
   const report = { time: Date.now(), max: MAX_SCORE, full: FULL, regions: {} };
@@ -83,6 +94,7 @@ async function settleRegion(region, nodes, current) {
 
 async function probe(node) {
   const result = { node, ok: false };
+  if (Date.now() > DEADLINE) return fail(result, "未检测（超过按钮运行时限）");
   try {
     const info = JSON.parse((await request(PURITY_URL, node)).body);
     if (typeof info.fraudScore !== "number" || !info.ip) return fail(result, "纯净度接口未返回分数");
@@ -190,7 +202,7 @@ function parseArgs(sourcePath) {
 
 function finish(report, error) {
   const previous = load();
-  if (report) save(report);
+  if (report) save(report, previous);
   const lines = error ? [error] : summarize(report);
   console.log(`纯净节点检测\n${lines.join("\n")}`);
 
@@ -244,8 +256,9 @@ function load() {
   }
 }
 
-function save(report) {
-  const compact = { time: report.time, max: report.max, regions: {} };
+// 合并保存：按钮只检测一个组时，不覆盖其他组的上次状态。
+function save(report, previous) {
+  const compact = { time: report.time, max: report.max, regions: Object.assign({}, previous && previous.regions) };
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
     compact.regions[region] = { status: item.status, node: item.node, score: item.result && item.result.score, tested: item.tested };

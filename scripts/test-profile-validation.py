@@ -72,12 +72,13 @@ class ValidatorRegression(unittest.TestCase):
         task = "test_ai_purity_task_matches_script_defaults"
         script = "https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js"
         cases = [
-            ("automatic-region", replace_once("static=日本纯净,", "available=日本纯净,"), groups),
-            ("region-mismatch", replace_once("static=美国纯净, server-tag-regex=(?i)", "static=美国纯净, server-tag-regex=(?i)US|"), groups),
-            ("cross-region-root", replace_once("static=AI, 日本纯净,", "static=AI纯净, 日本纯净, 美国纯净\nstatic=AI, 日本纯净,"), groups),
-            ("hk-purity", replace_once("static=AI, 日本纯净,", "static=香港纯净, 香港节点\nstatic=AI, 日本纯净,"), groups),
-            ("raw-region-first", replace_once("static=AI, 日本纯净,", "static=AI, 日本节点, 日本纯净,"), choices),
-            ("missing-cron", replace_once(f"{script}, tag=", f"{script}#full=1, tag="), task),
+            ("automatic-region", replace_once("static=日本节点（纯净）,", "available=日本节点（纯净）,"), groups),
+            ("region-mismatch", replace_once("static=美国节点（纯净）, server-tag-regex=(?i)", "static=美国节点（纯净）, server-tag-regex=(?i)US|"), groups),
+            ("cross-region-root", replace_once("static=AI, 日本节点,", "static=AI纯净, 日本节点（纯净）, 美国节点（纯净）\nstatic=AI, 日本节点,"), groups),
+            ("hk-purity", replace_once("static=AI, 日本节点,", "static=香港节点（纯净）, 香港节点\nstatic=AI, 日本节点,"), groups),
+            ("purity-not-below-region", replace_once("static=日本节点（纯净）,", "static=占位, direct\nstatic=日本节点（纯净）,"), groups),
+            ("purity-not-next-in-ai", replace_once("日本节点, 日本节点（纯净）, 美国节点,", "日本节点, 美国节点, 日本节点（纯净）,"), choices),
+            ("button-fragment", replace_once(f"event-interaction {script}, tag=", f"event-interaction {script}#full=1, tag="), task),
         ]
         with tempfile.TemporaryDirectory(prefix="quanx-validator-") as directory:
             for name, text, expected_test in cases:
