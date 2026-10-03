@@ -97,10 +97,15 @@ async function probe(node) {
   if (Date.now() > DEADLINE) return fail(result, "未检测（超过按钮运行时限）");
   try {
     const info = JSON.parse((await request(PURITY_URL, node)).body);
-    if (typeof info.fraudScore !== "number" || !info.ip) return fail(result, "纯净度接口未返回分数");
+    // 分数可能是数字或数字字符串；缺失或为空时视为检测失败，并带上原始值方便排查（不能当成 0 分）。
+    const raw = info.fraudScore;
+    const score = raw === null || raw === undefined || String(raw).trim() === "" ? NaN : Number(raw);
+    if (!Number.isFinite(score) || !info.ip) {
+      return fail(result, `纯净度接口未返回分数（fraudScore=${JSON.stringify(raw)}，ip=${info.ip || "无"}）`);
+    }
     result.ip = info.ip;
-    result.score = info.fraudScore;
-    if (info.fraudScore > MAX_SCORE) return fail(result, `欺诈分 ${info.fraudScore} > ${MAX_SCORE}`);
+    result.score = score;
+    if (score > MAX_SCORE) return fail(result, `欺诈分 ${score} > ${MAX_SCORE}`);
 
     const trace = parseTrace((await request(TRACE_URL, node)).body);
     result.loc = trace.loc;
