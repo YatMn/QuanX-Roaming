@@ -97,8 +97,8 @@ async function main() {
 
 async function settle(group) {
   const { name, current, results } = group;
-  const failed = results.filter(result => result.verdict !== "pass").map(result => `${result.node}：${result.reason}`);
-  const base = { tested: results.length, failed };
+  const passed = results.filter(result => result.verdict === "pass").length;
+  const base = { tested: results.length, passed, results };
   const mine = results.find(result => result.node === current);
   if (mine && mine.verdict === "pass") return Object.assign(base, { status: "kept", node: current, result: mine });
   if (mine && mine.verdict === "unknown") return Object.assign(base, { status: "unknown", node: current, result: mine });
@@ -298,20 +298,31 @@ function finish(report, error) {
 
 function summarize(report) {
   const lines = [];
-  if (!report.keyed) lines.push("未设置 proxycheck key，使用无 key 额度");
+  if (!report.keyed) lines.push("未读取到 proxycheck key，本次使用无 key 额度（在任务列表手动运行一次「纯净节点定时检测」即可保存 key）");
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
     const r = item.result;
-    const detail = r && Number.isFinite(r.risk) ? `（风险 ${r.risk}${r.type ? `，${r.type}` : ""}，${r.loc}）` : "";
+    const detail = r ? describe(r) : "";
     if (item.status === "missing") lines.push(`${region}：配置中没有这个策略组`);
     else if (item.status === "empty") lines.push(`${region}：没有匹配的节点`);
     else if (item.status === "none") lines.push(`${region}：检测 ${item.tested} 个，无合格节点，保持 ${item.node || "当前选择"}`);
     else if (item.status === "unknown") lines.push(`${region}：评分服务无结果，保持 ${item.node}`);
     else if (item.status === "switched") lines.push(`${region}：${item.from || "未选择"} → ${item.node}${detail}${r.verdict === "fallback" ? "（备选）" : ""}`);
     else lines.push(`${region}：保持 ${item.node}${detail}`);
-    if (FULL && item.failed && item.failed.length) item.failed.forEach(line => lines.push(`  × ${line}`));
+    if (FULL && item.results && item.results.length) {
+      lines.push(`  检测 ${item.tested} 个，合格 ${item.passed} 个：`);
+      item.results.forEach(result => {
+        if (result.verdict === "pass") lines.push(`  ✓ ${result.node}${describe(result)}`);
+        else if (result.verdict === "fallback") lines.push(`  △ ${result.node}：${result.reason}`);
+        else lines.push(`  × ${result.node}：${result.reason}`);
+      });
+    }
   });
   return lines;
+}
+
+function describe(result) {
+  return Number.isFinite(result.risk) ? `（风险 ${result.risk}${result.type ? `，${result.type}` : ""}，${result.loc}）` : "";
 }
 
 // 定时任务只在状态变化时通知：发生切换，或某组新变成「无合格节点 / 评分未知」。
