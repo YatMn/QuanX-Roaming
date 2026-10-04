@@ -9,10 +9,15 @@
  *
  * 检测步骤：
  *   1. 通过节点请求 chatgpt.com/cdn-cgi/trace，取出口 IP（IPv4 或 IPv6）和地区；地区不受 AI 服务支持的直接淘汰。
- *   2. 把出口 IP 一次批量提交给 proxycheck.io（v2 和 v3 各一次，不经过被测节点）：
- *      - 淘汰：v2 判为代理/VPN；v3 的 proxy/vpn/tor/compromised/scraper/anonymous 任一为真；或 v3 风险分 > 50。
- *      - 合格：v3 风险分 ≤ 阈值（默认 33；纯机房 IP 的基础分即 33）。
- *      - 备选：其余（v3 风险分在阈值与 50 之间）。
+ *      同时通过节点请求 my.ippure.com 取欺诈分（IPPure 对 IPv6 出口不给分）。
+ *   2. 把出口 IP 一次批量提交给 proxycheck.io（v2 和 v3 各一次，不经过被测节点）。
+ *   3. 两家评分取更严的结论：
+ *      - 淘汰：v2 判为代理/VPN；v3 的 proxy/vpn/tor/compromised/scraper/anonymous 任一为真；
+ *        或 IPPure > 50；或 proxycheck v3 风险分 > 50。
+ *      - 合格：有分数的来源全部达标（IPPure ≤ 25；proxycheck v3 ≤ 阈值，默认 33，纯机房 IP 的基础分即 33）。
+ *      - 备选：其余（分数在达标线与 50 之间）。
+ *      proxycheck 把部分机房地址段（如 Leaseweb Japan）判为 Business、风险 0，而 IPPure 判为数据中心高风险，
+ *      所以 IPv4 出口以 IPPure 为主；IPv6 出口只有 proxycheck 的分数。
  *
  * [task_local]
  * 0 9 * * * https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/scripts/quanx/ai-pure-switch.js, tag=纯净节点定时检测, img-url=checkmark.shield.fill.system, enabled=true
@@ -51,6 +56,8 @@ const TIMEOUT = 5000;
 const STORE_KEY = "quanx_roaming_ai_pure";
 const API_KEY_STORE = "quanx_roaming_proxycheck_key";
 const TRACE_URL = "https://chatgpt.com/cdn-cgi/trace";
+const PURITY_URL = "https://my.ippure.com/v1/info";
+const PURITY_MAX = 25;
 // 主流 AI 服务不支持或受制裁的出口地区；出口落在这些地区时，无论风险分多低都不合格。
 const BLOCKED_LOC = ["CN", "HK", "MO", "RU", "BY", "IR", "KP", "CU", "SY"];
 const V3_FLAGS = ["proxy", "vpn", "tor", "compromised", "scraper", "anonymous"];
@@ -113,14 +120,23 @@ async function settle(group) {
 
 // 风险分最低优先；同分保持订阅中的候选顺序（sort 是稳定排序）。
 function best(candidates) {
-  return candidates.slice().sort((a, b) => a.risk - b.risk)[0];
+  return candidates.slice().sort((a, b) => a.rank - b.rank)[0];
 }
 
 async function probe(node) {
   const result = { node, verdict: "fail" };
   if (Date.now() > DEADLINE) return fail(result, "未检测（超过按钮运行时限）");
   try {
-    const trace = parseTrace((await request({ url: TRACE_URL, opts: { policy: node } })).body);
+    const [traced, purity] = await Promise.all([
+      request({ url: TRACE_URL, opts: { policy: node } }),
+      request({ url: PURITY_URL, opts: { policy: node } }).then(response => JSON.parse(response.body)).catch(() => null),
+    ]);
+    const trace = parseTrace(traced.body);
+    if (purity) {
+      const value = toNumber(purity.fraudScore);
+      if (Number.isFinite(value)) result.purity = value;
+      if (purity.ip) result.purityIp = purity.ip;
+    }
     if (!trace.ip || !trace.loc) return fail(result, "出口检测无结果");
     result.ip = trace.ip;
     result.loc = trace.loc;
@@ -143,24 +159,44 @@ async function score(results) {
 
 function classify(result, v2, v3, error) {
   const d = v3 && v3.detections;
-  const missing = !d || d.risk === null || d.risk === undefined || String(d.risk).trim() === "";
-  if (missing || !Number.isFinite(Number(d.risk))) {
+  // v3 没有结果时退回 v2 的风险分。
+  const risk = d && Number.isFinite(toNumber(d.risk)) ? toNumber(d.risk) : v2 ? toNumber(v2.risk) : NaN;
+  const hasRisk = Number.isFinite(risk);
+  const hasPurity = Number.isFinite(result.purity);
+  if (hasRisk) {
+    result.risk = risk;
+    result.type = (v3 && v3.network && v3.network.type) || (v2 && v2.type) || "";
+  }
+  if (!hasRisk && !hasPurity) {
     result.verdict = "unknown";
     result.reason = `评分服务无结果${error ? `（${error}）` : ""}`;
     return;
   }
-  result.risk = Number(d.risk);
-  result.type = (v3.network && v3.network.type) || (v2 && v2.type) || "";
-  const flags = V3_FLAGS.filter(flag => d[flag] === true);
+  result.rank = Math.max(hasPurity ? result.purity : 0, hasRisk ? risk : 0);
+  const flags = d ? V3_FLAGS.filter(flag => d[flag] === true) : [];
   if (v2 && v2.proxy === "yes") flags.push(`v2:${v2.type || "proxy"}`);
-  if (flags.length) return fail(result, `风险 ${result.risk}，标记 ${flags.join("/")}`);
-  if (result.risk > FALLBACK_RISK) return fail(result, `风险 ${result.risk} > ${FALLBACK_RISK}`);
-  if (result.risk > MAX_RISK) {
+  if (flags.length) return fail(result, `${scores(result)}，标记 ${flags.join("/")}`);
+
+  // 每个来源各自分档，取最严的一档。
+  const band = (value, max) => (value <= max ? 0 : value <= FALLBACK_RISK ? 1 : 2);
+  const worst = Math.max(hasPurity ? band(result.purity, PURITY_MAX) : 0, hasRisk ? band(risk, MAX_RISK) : 0);
+  if (worst === 2) return fail(result, `${scores(result)}，超过 ${FALLBACK_RISK}`);
+  if (worst === 1) {
     result.verdict = "fallback";
-    result.reason = `风险 ${result.risk} > ${MAX_RISK}（备选）`;
+    result.reason = `${scores(result)}（备选）`;
     return;
   }
   result.verdict = "pass";
+}
+
+function scores(result) {
+  const purity = Number.isFinite(result.purity) ? `IPPure ${result.purity}` : "IPPure 无分数";
+  const risk = Number.isFinite(result.risk) ? `proxycheck ${result.risk}` : "proxycheck 无结果";
+  return `${purity}，${risk}`;
+}
+
+function toNumber(value) {
+  return value === null || value === undefined || String(value).trim() === "" ? NaN : Number(value);
 }
 
 async function lookup(version, ips) {
@@ -322,7 +358,9 @@ function summarize(report) {
 }
 
 function describe(result) {
-  return Number.isFinite(result.risk) ? `（风险 ${result.risk}${result.type ? `，${result.type}` : ""}，${result.loc}）` : "";
+  if (!result.ip) return "";
+  const ips = result.purityIp && result.purityIp !== result.ip ? `${result.ip}，IPPure 测得 ${result.purityIp}` : result.ip;
+  return `（${scores(result)}${result.type ? `，${result.type}` : ""}，${result.loc}，${ips}）`;
 }
 
 // 定时任务只在状态变化时通知：发生切换，或某组新变成「无合格节点 / 评分未知」。
@@ -352,7 +390,7 @@ function save(report, previous) {
   const compact = { time: report.time, max: report.max, regions: Object.assign({}, previous && previous.regions) };
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
-    compact.regions[region] = { status: item.status, node: item.node, risk: item.result && item.result.risk, tested: item.tested };
+    compact.regions[region] = { status: item.status, node: item.node, rank: item.result && item.result.rank, tested: item.tested };
   });
   $prefs.setValueForKey(JSON.stringify(compact), STORE_KEY);
 }
