@@ -7,7 +7,8 @@
  *   - 不会跨地区切换：选哪个纯净组由用户在 AI 策略中手动决定。
  *
  * 合格条件（全部满足）：
- *   1. my.ippure.com 返回数字 fraudScore，且 ≤ 阈值（默认 25，即「低风险」）；缺字段视为检测失败。
+ *   1. my.ippure.com 返回的 fraudScore ≤ 阈值（默认 25，即「低风险」）。IPPure 对 IPv6 出口不返回 fraudScore，
+ *      没有分数时按低风险处理，但排序时排在有分数的低风险节点之后。
  *   2. 同一节点请求 chatgpt.com/cdn-cgi/trace，地区不在 AI 不支持名单内；出口 IP 与上一步一致
  *      （两次请求分别走了 IPv4 和 IPv6 时，改为要求国家一致）。
  *
@@ -86,8 +87,9 @@ async function settleRegion(region, nodes, current) {
   const keep = passing.find(result => result.node === current);
   if (keep) return { status: "kept", node: current, result: keep, tested: results.length, failed };
 
-  // 欺诈分最低优先；同分保持订阅中的候选顺序（sort 是稳定排序）。
-  const best = passing.slice().sort((a, b) => a.score - b.score)[0];
+  // 有分数的低风险节点优先、欺诈分低者优先；没有分数的排在后面。同分保持订阅中的候选顺序（sort 是稳定排序）。
+  const rank = result => (result.noScore ? Infinity : result.score);
+  const best = passing.slice().sort((a, b) => (rank(a) === rank(b) ? 0 : rank(a) < rank(b) ? -1 : 1))[0];
   await send({ action: "set_policy_state", content: { [region]: best.node } });
   return { status: "switched", from: current, node: best.node, result: best, tested: results.length, failed };
 }
@@ -97,15 +99,17 @@ async function probe(node) {
   if (Date.now() > DEADLINE) return fail(result, "未检测（超过按钮运行时限）");
   try {
     const info = JSON.parse((await request(PURITY_URL, node)).body);
-    // 分数可能是数字或数字字符串；缺失或为空时视为检测失败，并带上原始值方便排查（不能当成 0 分）。
+    if (!info.ip) return fail(result, "纯净度接口未返回出口 IP");
+    result.ip = info.ip;
+    // 分数可能是数字或数字字符串。IPPure 对 IPv6 出口不返回分数：按低风险处理并标记，不能当成 0 分参与排序。
     const raw = info.fraudScore;
     const score = raw === null || raw === undefined || String(raw).trim() === "" ? NaN : Number(raw);
-    if (!Number.isFinite(score) || !info.ip) {
-      return fail(result, `纯净度接口未返回分数（fraudScore=${JSON.stringify(raw)}，ip=${info.ip || "无"}）`);
+    if (Number.isFinite(score)) {
+      result.score = score;
+      if (score > MAX_SCORE) return fail(result, `欺诈分 ${score} > ${MAX_SCORE}`);
+    } else {
+      result.noScore = true;
     }
-    result.ip = info.ip;
-    result.score = score;
-    if (score > MAX_SCORE) return fail(result, `欺诈分 ${score} > ${MAX_SCORE}`);
 
     const trace = parseTrace((await request(TRACE_URL, node)).body);
     result.loc = trace.loc;
@@ -228,7 +232,8 @@ function summarize(report) {
   const lines = [];
   Object.keys(report.regions).forEach(region => {
     const item = report.regions[region];
-    const detail = item.result ? `（欺诈分 ${item.result.score}，${item.result.loc}${item.result.crossFamily ? "，IPv4/IPv6 不同，按国家核对" : ""}）` : "";
+    const score = item.result && (item.result.noScore ? "无风险分数，按低风险处理" : `欺诈分 ${item.result.score}`);
+    const detail = item.result ? `（${score}，${item.result.loc}${item.result.crossFamily ? "，IPv4/IPv6 不同，按国家核对" : ""}）` : "";
     if (item.status === "missing") lines.push(`${region}：配置中没有这个策略组`);
     else if (item.status === "empty") lines.push(`${region}：没有匹配的节点`);
     else if (item.status === "none") lines.push(`${region}：检测 ${item.tested} 个，无低风险节点，保持 ${item.node || "当前选择"}`);

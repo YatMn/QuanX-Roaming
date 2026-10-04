@@ -63,7 +63,7 @@ https://raw.githubusercontent.com/YatMn/QuanX-Roaming/main/profiles/QuanX-Roamin
 1. 先复查组内当前节点。仍然合格就不动；不合格才把该地区全部节点测一遍，换到欺诈分最低的合格节点。
 2. 该地区没有合格节点时不切换，只发一次通知，不会把 AI 断网、切到高风险节点或换到别的地区。用哪个地区由你在 `AI` 里自己选。
 
-合格要同时满足：通过该节点查询 [IPPure](https://ippure.com/en/MyIP-Info-API) 的欺诈分不超过 25（即「低风险」），且接口确实返回了分数；同一节点访问 `chatgpt.com/cdn-cgi/trace` 看到的出口 IP 与 IPPure 一致，地区不是中国内地、香港、澳门或受制裁地区。香港出口不在 Anthropic 和 OpenAI 的支持范围内，所以没有香港纯净组，`香港节点` 在 AI 中排在最后，只留给 Gemini 等仍支持香港的服务。
+合格要同时满足：通过该节点查询 [IPPure](https://ippure.com/en/MyIP-Info-API) 的欺诈分不超过 25（即「低风险」）；IPPure 对 IPv6 出口不返回分数，这类节点按低风险处理，但排在有分数的低风险节点之后；同一节点访问 `chatgpt.com/cdn-cgi/trace` 看到的出口 IP 与 IPPure 一致，地区不是中国内地、香港、澳门或受制裁地区。香港出口不在 Anthropic 和 OpenAI 的支持范围内，所以没有香港纯净组，`香港节点` 在 AI 中排在最后，只留给 Gemini 等仍支持香港的服务。
 
 需要注意：
 
